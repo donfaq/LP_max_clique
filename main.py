@@ -35,14 +35,6 @@ def read_dimacs_graph(file_path):
                 continue
         return nx.Graph(edges)
 
-# Problem:
-# x1 + x2 + ... + xn -> max
-# xk + ... + xl <= 1  (ind_set_num times, [k...l] - nodes from idipendent set)
-# 0 <= x1 <= 1
-# ...
-# 0 <= xn <= 1
-# xi + xj <= 1, for every pair (i,j) which doesn't connected by edge
-
 @timing
 def solve(nodes: list, ind_sets: list, not_connected: list):
     '''
@@ -109,9 +101,15 @@ def get_ind_sets(graph):
                 [key for key, value in d.items() if value == color])
     return ind_sets
 
+def get_branching_variable(solution:list):
+    i = 0
+    solution = iter(solution)
+    while next(solution).is_integer():
+        i+=1
+    return 'x{0}'.format(i)
 
 def main():
-    graph = read_dimacs_graph('.\\samples\\miles250.col')
+    graph = read_dimacs_graph('.\\samples\\le450_5a.col')
     nodes = graph.nodes
     ind_sets = get_ind_sets(graph)
 
@@ -121,6 +119,7 @@ def main():
     solution = solve(nodes, ind_sets, nx.complement(graph).edges)
 
     print('solution', solution)
+    print(get_branching_variable(solution[0]))
 
 
 if __name__ == '__main__':
