@@ -2,6 +2,7 @@ import time
 import cplex
 import networkx as nx
 
+
 def timing(f):
     '''
     Measures time of function execution
@@ -14,6 +15,7 @@ def timing(f):
             f.__name__, (time2 - time1) * 1000.0))
         return (ret, '{0:.3f} ms'.format((time2 - time1) * 1000.0))
     return wrap
+
 
 def read_dimacs_graph(file_path):
     '''
@@ -35,7 +37,7 @@ def read_dimacs_graph(file_path):
                 continue
         return nx.Graph(edges)
 
-@timing
+
 def solve(nodes: list, ind_sets: list, not_connected: list):
     '''
     Construct and solve LP-relaxation of max clique problem
@@ -44,7 +46,7 @@ def solve(nodes: list, ind_sets: list, not_connected: list):
 
     Problem\n
     x1 + x2 + ... + xn -> max\n
-    xk + ... + xl <= 1  (ind_set_num times, [k...l] - nodes from idipendent set)\n
+    xk + ... + xl <= 1  (ind_set_num times, [k...l] - nodes from independent set)\n
     0 <= x1 <= 1\n
     ...\n
     0 <= xn <= 1\n
@@ -62,7 +64,7 @@ def solve(nodes: list, ind_sets: list, not_connected: list):
     constraint_senses = ['L'] * (len(ind_sets) + len(not_connected))
 
     problem = cplex.Cplex()
-
+    
     problem.objective.set_sense(problem.objective.sense.maximize)
     problem.variables.add(obj=obj, ub=upper_bounds,
                           names=columns_names, types=types)
@@ -81,7 +83,7 @@ def solve(nodes: list, ind_sets: list, not_connected: list):
                                    names=constraint_names)
 
     problem.solve()
-    return problem.solution.get_values()
+    return problem
 
 
 def get_ind_sets(graph):
@@ -101,25 +103,37 @@ def get_ind_sets(graph):
                 [key for key, value in d.items() if value == color])
     return ind_sets
 
-def get_branching_variable(solution:list):
-    i = 0
-    solution = iter(solution)
-    while next(solution).is_integer():
-        i+=1
-    return 'x{0}'.format(i)
+
+def get_branching_variable(solution: list):
+    return next((index for index, value in enumerate(solution) if not value.is_integer()), None)
+
+
+def branching():
+    pass
+
+
+def bb_max_clique(graph):
+    nodes = graph.nodes
+    ind_sets = get_ind_sets(graph)
+    problem = solve(nodes, ind_sets, nx.complement(graph).edges)
+    print('solution', problem.solution.get_values())
+    branching_variable = get_branching_variable(problem.solution.get_values())
+    print('branching_variable', branching_variable)
+    print('branching_variable value',
+          problem.solution.get_values(branching_variable))
+    problem.linear_constraints.add(lin_expr=[[[branching_variable], [1.0]]],
+                                   senses=['E'],
+                                   rhs=[1.0],
+                                   names=['branch0_1'])
+    problem.solve()
+    # TODO: cplex.exceptions.errors.CplexSolverError: CPLEX Error  1017: Not available for mixed-integer problems.
+    print('solution', problem.solution.get_values())
+    print('solution', problem.solution.get_values(branching_variable))
+
 
 def main():
     graph = read_dimacs_graph('.\\samples\\le450_5a.col')
-    nodes = graph.nodes
-    ind_sets = get_ind_sets(graph)
-
-    print('NODES', len(graph.nodes))
-    print('IND_SETS', len(ind_sets))
-
-    solution = solve(nodes, ind_sets, nx.complement(graph).edges)
-
-    print('solution', solution)
-    print(get_branching_variable(solution[0]))
+    solution = bb_max_clique(graph)
 
 
 if __name__ == '__main__':
