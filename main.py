@@ -28,7 +28,7 @@ def read_dimacs_graph(file_path):
                 print(*line.split()[1:])
             # first line: p name num_of_vertices num_of_edges
             elif line.startswith('p'):
-                p, name, vertices_num, edges_num = line.split()
+                _, name, vertices_num, edges_num = line.split()
                 print('{0} {1} {2}'.format(name, vertices_num, edges_num))
             elif line.startswith('e'):
                 _, v1, v2 = line.split()
@@ -38,102 +38,110 @@ def read_dimacs_graph(file_path):
         return nx.Graph(edges)
 
 
-def solve(nodes: list, ind_sets: list, not_connected: list):
-    '''
-    Construct and solve LP-relaxation of max clique problem
-    nodes: list of names of all nodes in graph
-    ind_sets: list of independent sets (each as list of nodes names)
+class branch_and_bound:
+    def __init__(self, graph: nx.Graph):
+        self.graph = graph
+        self.nodes = self.graph.nodes
+        self.ind_sets = []
+        self.get_ind_sets()
+        self.not_connected = nx.complement(self.graph).edges
+        self.init_problem = self.construct_problem()
+        self.current_maximum_clique_len = 0
 
-    Problem\n
-    x1 + x2 + ... + xn -> max\n
-    xk + ... + xl <= 1  (ind_set_num times, [k...l] - nodes from independent set)\n
-    0 <= x1 <= 1\n
-    ...\n
-    0 <= xn <= 1\n
-    xi + xj <= 1, for every pair (i,j) which doesn't connected by edge\n
-    '''
-    obj = [1.0] * len(nodes)
-    upper_bounds = [1.0] * len(nodes)
-    types = 'C' * len(nodes)
-    # lower bounds are all 0.0 (the default)
-    columns_names = ['x{0}'.format(x) for x in nodes]
-    right_hand_side = [1.0] * (len(ind_sets) + len(not_connected))
-    name_iter = iter(range(len(ind_sets) + len(nodes)**2))
-    constraint_names = ['c{0}'.format(next(name_iter)) for x in range(
-        (len(ind_sets) + len(not_connected)))]
-    constraint_senses = ['L'] * (len(ind_sets) + len(not_connected))
+    def get_ind_sets(self):
+        strategies = [nx.coloring.strategy_largest_first,
+                      nx.coloring.strategy_random_sequential,
+                      # nx.coloring.strategy_smallest_last,
+                      nx.coloring.strategy_independent_set,
+                      nx.coloring.strategy_connected_sequential_bfs,
+                      nx.coloring.strategy_connected_sequential_dfs,
+                      nx.coloring.strategy_saturation_largest_first]
 
-    problem = cplex.Cplex()
-    
-    problem.objective.set_sense(problem.objective.sense.maximize)
-    problem.variables.add(obj=obj, ub=upper_bounds,
-                          names=columns_names, types=types)
+        for strategy in strategies:
+            d = nx.coloring.greedy_color(self.graph, strategy=strategy)
+            for color in set(color for node, color in d.items()):
+                self.ind_sets.append(
+                    [key for key, value in d.items() if value == color])
 
-    constraints = []
-    for ind_set in ind_sets:
-        constraints.append([['x{0}'.format(x)
-                             for x in ind_set], [1.0] * len(ind_set)])
-    for xi, xj in not_connected:
-        constraints.append(
-            [['x{0}'.format(xi), 'x{0}'.format(xj)], [1.0, 1.0]])
+    def get_branching_variable(self, solution: list):
+        return next((index for index, value in enumerate(solution) if not value.is_integer()), None)
 
-    problem.linear_constraints.add(lin_expr=constraints,
-                                   senses=constraint_senses,
-                                   rhs=right_hand_side,
-                                   names=constraint_names)
+    def construct_problem(self):
+        '''
+        Construct LP-relaxation of max clique problem
+        nodes: list of names of all nodes in graph
+        ind_sets: list of independent sets (each as list of nodes names)
 
-    problem.solve()
-    return problem
+        Problem\n
+        x1 + x2 + ... + xn -> max\n
+        xk + ... + xl <= 1  (ind_set_num times, [k...l] - nodes from independent set)\n
+        0 <= x1 <= 1\n
+        ...\n
+        0 <= xn <= 1\n
+        xi + xj <= 1, for every pair (i,j) which doesn't connected by edge\n
+        '''
+        obj = [1.0] * len(self.nodes)
+        upper_bounds = [1.0] * len(self.nodes)
+        types = 'C' * len(self.nodes)
+        # lower bounds are all 0.0 (the default)
+        columns_names = ['x{0}'.format(x) for x in self.nodes]
+        right_hand_side = [1.0] * \
+            (len(self.ind_sets) + len(self.not_connected))
+        name_iter = iter(range(len(self.ind_sets) + len(self.nodes)**2))
+        constraint_names = ['c{0}'.format(next(name_iter)) for x in range(
+            (len(self.ind_sets) + len(self.not_connected)))]
+        constraint_senses = ['L'] * \
+            (len(self.ind_sets) + len(self.not_connected))
 
+        problem = cplex.Cplex()
 
-def get_ind_sets(graph):
-    ind_sets = []
-    strategies = [nx.coloring.strategy_largest_first,
-                  nx.coloring.strategy_random_sequential,
-                  nx.coloring.strategy_smallest_last,
-                  nx.coloring.strategy_independent_set,
-                  nx.coloring.strategy_connected_sequential_bfs,
-                  nx.coloring.strategy_connected_sequential_dfs,
-                  nx.coloring.strategy_saturation_largest_first]
-    for strategy in strategies:
-        d = nx.coloring.greedy_color(
-            graph, strategy=strategy)
-        for color in set(color for node, color in d.items()):
-            ind_sets.append(
-                [key for key, value in d.items() if value == color])
-    return ind_sets
+        problem.objective.set_sense(problem.objective.sense.maximize)
+        problem.variables.add(obj=obj, ub=upper_bounds,
+                              names=columns_names, types=types)
 
+        constraints = []
+        for ind_set in self.ind_sets:
+            constraints.append([['x{0}'.format(x)
+                                 for x in ind_set], [1.0] * len(ind_set)])
+        for xi, xj in self.not_connected:
+            constraints.append(
+                [['x{0}'.format(xi), 'x{0}'.format(xj)], [1.0, 1.0]])
 
-def get_branching_variable(solution: list):
-    return next((index for index, value in enumerate(solution) if not value.is_integer()), None)
+        problem.linear_constraints.add(lin_expr=constraints,
+                                       senses=constraint_senses,
+                                       rhs=right_hand_side,
+                                       names=constraint_names)
+        return problem
 
+    def branching(self, problem: cplex.Cplex):
+        def add_constraint(problem: cplex.Cplex, bv: float, rhs: float):
+            problem.linear_constraints.add(lin_expr=[[[bv], [1.0]]],
+                                           senses=['E'],
+                                           rhs=[rhs],
+                                           names=['branch_{0}_{1}'.format(bv, rhs)])
+            return problem
+        problem.solve()
+        solution = problem.solution.get_values()
+        print(solution)
+        if sum(solution) > self.current_maximum_clique_len:
+            bvar = self.get_branching_variable(solution)
+            if bvar is None:
+                self.current_maximum_clique_len = len(
+                    list(filter(lambda x: x == 1.0, solution)))
+                print('MAX_LEN',self.current_maximum_clique_len)
+                return self.current_maximum_clique_len
+            return max(self.branching(add_constraint(cplex.Cplex(problem), bvar, 1.0)),
+                       self.branching(add_constraint(cplex.Cplex(problem), bvar, 0.0)))
+        return 0
 
-def branching():
-    pass
-
-
-def bb_max_clique(graph):
-    nodes = graph.nodes
-    ind_sets = get_ind_sets(graph)
-    problem = solve(nodes, ind_sets, nx.complement(graph).edges)
-    print('solution', problem.solution.get_values())
-    branching_variable = get_branching_variable(problem.solution.get_values())
-    print('branching_variable', branching_variable)
-    print('branching_variable value',
-          problem.solution.get_values(branching_variable))
-    problem.linear_constraints.add(lin_expr=[[[branching_variable], [1.0]]],
-                                   senses=['E'],
-                                   rhs=[1.0],
-                                   names=['branch0_1'])
-    problem.solve()
-    # TODO: cplex.exceptions.errors.CplexSolverError: CPLEX Error  1017: Not available for mixed-integer problems.
-    print('solution', problem.solution.get_values())
-    print('solution', problem.solution.get_values(branching_variable))
+    def solve(self):
+        return self.branching(self.init_problem)
 
 
 def main():
-    graph = read_dimacs_graph('.\\samples\\le450_5a.col')
-    solution = bb_max_clique(graph)
+    graph = read_dimacs_graph('./samples/le450_25a.col')
+    # bb_max_clique(graph)
+    print(branch_and_bound(graph).solve())
 
 
 if __name__ == '__main__':
