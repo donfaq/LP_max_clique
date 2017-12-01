@@ -1,41 +1,5 @@
-import time
+from utils import *
 import cplex
-import networkx as nx
-
-
-def timing(f):
-    '''
-    Measures time of function execution
-    '''
-    def wrap(*args):
-        time1 = time.time()
-        ret = f(*args)
-        time2 = time.time()
-        print('\n{0} function took {1:.3f} ms'.format(
-            f.__name__, (time2 - time1) * 1000.0))
-        return (ret, '{0:.3f} ms'.format((time2 - time1) * 1000.0))
-    return wrap
-
-
-def read_dimacs_graph(file_path):
-    '''
-        Parse .col file and return graph object
-    '''
-    edges = []
-    with open(file_path, 'r') as file:
-        for line in file:
-            if line.startswith('c'):  # graph description
-                print(*line.split()[1:])
-            # first line: p name num_of_vertices num_of_edges
-            elif line.startswith('p'):
-                _, name, vertices_num, edges_num = line.split()
-                print('{0} {1} {2}'.format(name, vertices_num, edges_num))
-            elif line.startswith('e'):
-                _, v1, v2 = line.split()
-                edges.append((v1, v2))
-            else:
-                continue
-        return nx.Graph(edges)
 
 
 class branch_and_bound:
@@ -51,7 +15,6 @@ class branch_and_bound:
     def get_ind_sets(self):
         strategies = [nx.coloring.strategy_largest_first,
                       nx.coloring.strategy_random_sequential,
-                      # nx.coloring.strategy_smallest_last,
                       nx.coloring.strategy_independent_set,
                       nx.coloring.strategy_connected_sequential_bfs,
                       nx.coloring.strategy_connected_sequential_dfs,
@@ -120,28 +83,42 @@ class branch_and_bound:
                                            rhs=[rhs],
                                            names=['branch_{0}_{1}'.format(bv, rhs)])
             return problem
-        problem.solve()
-        solution = problem.solution.get_values()
+        try:
+            problem.solve()
+            solution = problem.solution.get_values()
+        except cplex.exceptions.CplexSolverError:
+            return 0
         print(solution)
         if sum(solution) > self.current_maximum_clique_len:
             bvar = self.get_branching_variable(solution)
             if bvar is None:
                 self.current_maximum_clique_len = len(
                     list(filter(lambda x: x == 1.0, solution)))
-                print('MAX_LEN',self.current_maximum_clique_len)
-                return self.current_maximum_clique_len
+                print('MAX_LEN', self.current_maximum_clique_len)
+                return self.current_maximum_clique_len, solution
             return max(self.branching(add_constraint(cplex.Cplex(problem), bvar, 1.0)),
-                       self.branching(add_constraint(cplex.Cplex(problem), bvar, 0.0)))
+                       self.branching(add_constraint(cplex.Cplex(problem), bvar, 0.0)),
+                       key=lambda x: x[0] if isinstance(x, (list, tuple)) else x)
         return 0
 
+    @timing
     def solve(self):
         return self.branching(self.init_problem)
 
 
 def main():
-    graph = read_dimacs_graph('./samples/le450_25a.col')
-    # bb_max_clique(graph)
-    print(branch_and_bound(graph).solve())
+    args = arguments()
+    graph = read_dimacs_graph(args.path)
+    try:
+        with time_limit(args.time):
+            solution, extime = branch_and_bound(graph).solve()
+
+            print('Maximum clique size:', solution[0])
+            print('Nodes:', list(index + 1 for index,
+                                 value in enumerate(solution[1]) if value == 1.0))
+    except TimeoutException:
+        print("Timed out!")
+        sys.exit(0)
 
 
 if __name__ == '__main__':
