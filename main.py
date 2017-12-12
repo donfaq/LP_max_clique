@@ -9,8 +9,9 @@ class branch_and_bound:
         self.ind_sets = []
         self.get_ind_sets()
         self.not_connected = nx.complement(self.graph).edges
-        self.init_problem = self.construct_problem()
+        self.problem = self.construct_problem()
         self.current_maximum_clique_len = 0
+        self.branch_num = 0
 
     def get_ind_sets(self):
         strategies = [nx.coloring.strategy_largest_first,
@@ -27,7 +28,8 @@ class branch_and_bound:
                     [key for key, value in d.items() if value == color])
 
     def get_branching_variable(self, solution: list):
-        return next((index for index, value in enumerate(solution) if not value.is_integer()), None)
+        return max(list(filter(lambda x: not x[1].is_integer(), enumerate(solution))), 
+                    key=lambda x: x[1], default=(None, None))[0]
 
     def construct_problem(self):
         '''
@@ -50,14 +52,17 @@ class branch_and_bound:
         columns_names = ['x{0}'.format(x) for x in self.nodes]
         right_hand_side = [1.0] * \
             (len(self.ind_sets) + len(self.not_connected))
-        name_iter = iter(range(len(self.ind_sets) + len(self.nodes)**2))
+        name_iter = iter(range(len(self.ind_sets) + len(self.nodes) ** 2))
         constraint_names = ['c{0}'.format(next(name_iter)) for x in range(
             (len(self.ind_sets) + len(self.not_connected)))]
         constraint_senses = ['L'] * \
             (len(self.ind_sets) + len(self.not_connected))
 
         problem = cplex.Cplex()
-
+        problem.set_log_stream(None)
+        problem.set_results_stream(None)
+        problem.set_warning_stream(None)
+        problem.set_error_stream(None)
         problem.objective.set_sense(problem.objective.sense.maximize)
         problem.variables.add(obj=obj, ub=upper_bounds,
                               names=columns_names, types=types)
@@ -76,19 +81,19 @@ class branch_and_bound:
                                        names=constraint_names)
         return problem
 
-    def branching(self, problem: cplex.Cplex):
-        def add_constraint(problem: cplex.Cplex, bv: float, rhs: float):
-            problem.linear_constraints.add(lin_expr=[[[bv], [1.0]]],
-                                           senses=['E'],
-                                           rhs=[rhs],
-                                           names=['branch_{0}_{1}'.format(bv, rhs)])
-            return problem
+    def branching(self):
+        def add_constraint(bv: float, rhs: float, cur_branch: int):
+            self.problem.linear_constraints.add(lin_expr=[[[bv], [1.0]]],
+                                                senses=['E'],
+                                                rhs=[rhs],
+                                                names=['branch_{0}'.format(cur_branch)])
+
         try:
-            problem.solve()
-            solution = problem.solution.get_values()
+            self.problem.solve()
+            solution = self.problem.solution.get_values()
         except cplex.exceptions.CplexSolverError:
             return 0
-        print(solution)
+
         if sum(solution) > self.current_maximum_clique_len:
             bvar = self.get_branching_variable(solution)
             if bvar is None:
@@ -96,14 +101,22 @@ class branch_and_bound:
                     list(filter(lambda x: x == 1.0, solution)))
                 print('MAX_LEN', self.current_maximum_clique_len)
                 return self.current_maximum_clique_len, solution
-            return max(self.branching(add_constraint(cplex.Cplex(problem), bvar, 1.0)),
-                       self.branching(add_constraint(cplex.Cplex(problem), bvar, 0.0)),
-                       key=lambda x: x[0] if isinstance(x, (list, tuple)) else x)
+            else:
+                self.branch_num += 1
+                cur_branch = self.branch_num
+                add_constraint(bvar, 1.0, cur_branch)
+                branch_1 = self.branching()
+                self.problem.linear_constraints.delete(
+                    'branch_{0}'.format(cur_branch))
+                add_constraint(bvar, 0.0, cur_branch)
+                branch_2 = self.branching()
+                return max([branch_1, branch_2], 
+                            key=lambda x: x[0] if isinstance(x, (list, tuple)) else x)
         return 0
 
     @timing
     def solve(self):
-        return self.branching(self.init_problem)
+        return self.branching()
 
 
 def main():
