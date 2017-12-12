@@ -99,7 +99,7 @@ class branch_and_bound:
             if bvar is None:
                 self.current_maximum_clique_len = len(
                     list(filter(lambda x: x == 1.0, solution)))
-                print('MAX_LEN', self.current_maximum_clique_len)
+                print('current max clique found:', self.current_maximum_clique_len)
                 return self.current_maximum_clique_len, solution
             else:
                 self.branch_num += 1
