@@ -104,14 +104,14 @@ class branch_and_bound:
             else:
                 self.branch_num += 1
                 cur_branch = self.branch_num
+
                 add_constraint(bvar, 1.0, cur_branch)
                 branch_1 = self.branching()
-                self.problem.linear_constraints.delete(
-                    'branch_{0}'.format(cur_branch))
+                self.problem.linear_constraints.delete('branch_{0}'.format(cur_branch))
                 add_constraint(bvar, 0.0, cur_branch)
                 branch_2 = self.branching()
-                return max([branch_1, branch_2], 
-                            key=lambda x: x[0] if isinstance(x, (list, tuple)) else x)
+                self.problem.linear_constraints.delete('branch_{0}'.format(cur_branch))
+                return max([branch_1, branch_2], key=lambda x: x[0] if isinstance(x, (list, tuple)) else x)
         return 0
 
     @timing
