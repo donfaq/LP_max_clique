@@ -17,7 +17,7 @@ All this graphs are placed in `samples` folder. <br>More of them you can find he
 Huge ones: http://iridia.ulb.ac.be/~fmascia/maximum_clique/DIMACS-benchmark#detC125.9
 
 ## Results
-Graph name|#Nodes|#Edges|Found clique length|Time (ms)/Timeout(60s)
+Graph name|#Nodes|#Edges|Found clique length|Time(ms)
 ---|---|---|---|---
 MANN_a9.clq|45|918|16|559.974 ms
 c-fat200-1.clq|200|1534|12|2488.318 ms
